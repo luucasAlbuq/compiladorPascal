@@ -1,0 +1,1158 @@
+/*
+  pascal.cup
+*/
+   
+/* ----------------------Preliminary Declarations Section--------------------*/
+   
+import java_cup.runtime.*;
+import java.util.*;
+import symbTable.*;
+import tipo.*;
+   
+/* Parser code to change the way the parser reports errors (include
+   line and column number of the error). */
+   
+parser code {:
+    
+    public static int errors = 0;
+    public static StringBuffer code = new StringBuffer();
+    
+    public void report_error(String message, Object info) {
+   
+        
+        StringBuilder m = new StringBuilder("Error");
+   		errors++; 
+          
+        m.append(" : "+message);
+   
+        System.err.println("Error "+ Main.pascalLexer.current_lexeme() + " : Sintantic error");
+        System.err.println(m + "" + (info instanceof String ? info : ""));
+        
+    }
+   
+    /* Change the method report_fatal_error so when it reports a fatal
+       error it will display the line and column number of where the
+       fatal error occurred in the input as well as the reason for the
+       fatal error which is passed into the method in the object
+       'message' and then exit.*/
+    public void report_fatal_error(String message, Object info) {
+        report_error(message, info);
+        System.exit(1);
+    }
+    
+    public void sem_error(String lexeme, String message) {
+		errors ++;
+		System.err.println("Error in line "+ Main.pascalLexer.current_line() + " : Semantic error");
+      	System.err.println("==> " + message + ": "+ lexeme + "\n");
+  	}
+  	
+  	public void sem_error(String message) {
+		errors ++;
+		System.err.println("Error "+ Main.pascalLexer.current_lexeme() + " : Semantic error");
+      	System.err.println("==> " + message +"\n");
+  	}
+  	
+    
+:};
+
+action code {:
+	
+	class Exp {
+	  public Tipo tipo;
+	  public String code;
+	  public boolean isConstant;
+
+	  Exp(Tipo t, String code) {
+		this(t, code, false);
+	  }
+	  
+	  Exp(Tipo t, String code, boolean cte) {
+		tipo = t;
+		this.code = code;
+		isConstant = cte;
+	  }
+
+	}
+	
+	class Reg {
+		
+		 
+		public String id;
+		public String val;
+		
+		Reg(String id) {
+			this(id,"");
+		}
+		
+		Reg(String id, String val) {
+			this.id = id;
+			this.val = val;
+		}
+	
+	}
+	
+	public static String assembOp(String pascOper) {
+		if(pascOper.equals("-")) {
+			return "SUB";
+		}
+		else if(pascOper.equals("+")) {
+			return "ADD";
+		}
+		else if(pascOper.equals("*")) {
+			return "MUL";
+		}
+		else if(pascOper.equals("/") || pascOper.toLowerCase().equals("div")) {
+			return "DIV";
+		}
+		return "";
+	}
+	
+	/* listas auxiliares para gerenciar registradores */
+	List<Reg> argRegs = new ArrayList<Reg> ();
+	
+	/* pesquisa um registrador argumento dado seu valor */
+	public Reg getArgReg(String val) {
+		for(Reg reg : argRegs) {
+			if(reg.val.equals(val))
+				return reg;
+		}
+		return null;
+	}
+	
+	/* lista para gerenciar destino de laços (labels) */
+	List<Integer> labels = new ArrayList<Integer>();
+	
+	/* variavel auxiliar para manipulacao de labels */
+	int label = 0;
+	
+:};
+   
+init with {:
+	TabelaDeSimbolos.inicializa();
+	Tipo.criaTipos();
+:};
+   
+/* ------------Declaration of Terminals and Non Terminals Section----------- */
+   
+/* Terminals (tokens returned by the scanner).  */
+   
+terminal  ARRAY, BEGIN, CASE, CONST;
+terminal  String AND, NOT, OR, MINUS, STAR, PLUS;
+terminal  String DIV, MOD, SLASH;
+terminal  DO, DOWNTO, ELSE, END, FILE, FOR, FORWARD, FUNCTION, GOTO, IF;
+terminal  IMPLEMENTATION, IN, INTERFACE, LABEL, NIL;
+terminal  OF, PACKED, PROCEDURE, PROGRAM, RECORD, REPEAT, SET, EXTERNAL;
+terminal  STRING, THEN, TO, TYPE, UNIT, UNTIL, USES, VAR, WHILE, WITH, XOR;
+terminal  SEMICOLON, DOT;
+terminal  String IDENTIFIER, CHARACTER_STRING;
+terminal  ASSIGNMENT;
+terminal  COLON, COMMA, DIGSEQ;
+terminal  DOTDOT, EQUAL;
+terminal  GE, GT, LBRAC, LE, LPAREN, LT;
+terminal  NOTEQUAL, PBEGIN, PFILE, RBRAC;
+terminal  REALNUMBER, RPAREN, STARSTAR, UPARROW;
+terminal  INTEGER, BOOLEAN, REAL, CHAR, TRUE, FALSE;
+
+
+   
+/* Non terminals used in the grammar section. */
+   
+non terminal program, program_heading;
+non terminal List<String> identifier_list, for_designator, while_designator;
+non terminal block, module;
+non terminal label_declaration_part, label_list, label, constant_definition_part;
+non terminal constant_list, constant_definition;
+non terminal Tipo cexpression, csimple_expression;
+non terminal Tipo cterm, cfactor, cexponentiation, cprimary, constant, non_string;
+non terminal type_definition_part, type_definition_list, type_definition;
+non terminal Tipo type_denoter, result_type;
+non terminal new_type, new_ordinal_type, enumerated_type, subrange_type, new_structured_type;
+non terminal structured_type, array_type, index_list, index_type, ordinal_type, component_type;
+non terminal record_type, record_section_list, record_section, variant_part, variant_selector;
+non terminal variant_list, variant, case_constant_list, case_constant, tag_field, tag_type;
+non terminal set_type, base_type, file_type, new_pointer_type, domain_type, variable_declaration_part;
+non terminal variable_declaration_list, variable_declaration, procedure_and_function_declaration_part;
+non terminal proc_or_func_declaration_list, proc_or_func_declaration, procedure_declaration;
+non terminal procedure_heading, directive;
+non terminal List<Tipo> formal_parameter_list, formal_parameter_section_list;
+non terminal List<Tipo> formal_parameter_section, value_parameter_specification, variable_parameter_specification;
+non terminal procedural_parameter_specification, functional_parameter_specification;
+non terminal String procedure_identification, function_identification, direction;
+non terminal procedure_block, function_declaration, function_heading;
+non terminal function_block, statement_part, compound_statement, statement_sequence, statement, open_statement;
+non terminal closed_statement, non_labeled_closed_statement, non_labeled_open_statement, repeat_statement;
+non terminal open_while_statement, closed_while_statement, open_for_statement, closed_for_statement;
+non terminal open_with_statement, closed_with_statement, open_if_statement, closed_if_statement;
+non terminal Tipo assignment_statement;
+non terminal Exp variable_access; 
+non terminal indexed_variable, index_expression_list, index_expression;
+non terminal field_designator, procedure_statement;
+non terminal List<Exp> params, actual_parameter_list;
+non terminal Exp actual_parameter;
+non terminal goto_statement, case_statement, case_index, case_list_element_list, case_list_element;
+non terminal Exp control_variable, initial_value, final_value, record_variable_list;
+non terminal Exp boolean_expression, expression, simple_expression, term, factor, exponentiation, primary;
+non terminal Exp unsigned_constant, unsigned_number, unsigned_integer, unsigned_real, function_designator;
+non terminal set_constructor, member_designator_list, member_designator, relop;
+non terminal String identifier, addop, mulop, sign;
+non terminal semicolon, comma;
+
+/* -------------Precedence and Associatively of Terminals Section----------- */
+   
+/*
+  Precedence of non terminals could be defined here.  If you do define
+  precedence here you won't need to worry about precedence in the
+  Grammar Section, i.e. that TIMES should have a higher precedence
+  than PLUS.
+  
+  The precedence defined here would look something like this where the
+  lower line always will have higher precedence than the line before it.
+   
+  precedence left PLUS, MINUS; 
+  precedence left TIMES, DIVIDE; 
+*/
+
+  precedence left STAR, DIV;
+
+/* ----------------------------Gramatica-------------------- */
+
+   
+   program ::= program_heading semicolon block DOT {: parser.code.append("\t HALT \n\n"); :};
+
+   program_heading ::= PROGRAM identifier:id 
+						{: 
+							parser.code.append("; Codigo assembly simples para "+id+".\n"); 
+							parser.code.append("; Os registradores A0...An sao argumentos de funcoes/procedimentos.\n");
+							parser.code.append("; O registrador V0 guarda retorno de funcoes.\n\n"); 
+							parser.code.append("\t LD SP , #stackStart\n"); 
+							parser.code.append("\t BR main \n"); 
+						:}
+   					 | PROGRAM identifier:id {: 
+							parser.code.append("// Assembly code to "+id+" \n\n"); 
+							parser.code.append("\t LD SP , #stackStart\n"); 
+							parser.code.append("\t BR main \n"); 
+						:}
+					   LPAREN identifier_list RPAREN;
+
+   identifier_list ::= identifier_list : il comma IDENTIFIER : id {: il.add(id.toLowerCase()); RESULT = il; :}
+   					 | IDENTIFIER : id {:   List<String> il = new ArrayList<String>();
+   					 						il.add(id.toLowerCase());
+   					 						RESULT = il; :} ;
+
+   block ::= label_declaration_part constant_definition_part type_definition_part 
+			  variable_declaration_part procedure_and_function_declaration_part
+ 			  {: 
+				 if(TabelaDeSimbolos.escopoCorrente.isRoot()) { 
+					parser.code.append("main: \n");
+				 } 
+			   :}
+ 			  statement_part;
+
+   module ::= constant_definition_part type_definition_part variable_declaration_part 
+   			  procedure_and_function_declaration_part;
+
+   label_declaration_part ::= LABEL label_list semicolon 
+   							| error {: parser.report_error("","expected ';' before token"); :} semicolon | ;
+
+   label_list ::= label_list comma label | label;
+
+   label ::= DIGSEQ;
+
+   constant_definition_part ::= CONST constant_list | ;
+
+   constant_list ::= constant_list constant_definition | constant_definition;
+
+   constant_definition ::= identifier:id EQUAL cexpression:tce semicolon
+   						{: if(! TabelaDeSimbolos.inserirVariavel(id.toLowerCase(), new Simbolo(id, tce, true))) {
+                            	parser.sem_error(id, "duplicate name");
+                            }  
+                         :} 
+   						| error {: parser.report_error("","expected ';' before token"); :} semicolon;
+
+   /*constant : cexpression ;  /* good stuff! */
+
+   cexpression ::= csimple_expression:cse {: RESULT = cse; :} | csimple_expression relop csimple_expression;
+
+   csimple_expression ::= cterm:ct {: RESULT = ct; :} | csimple_expression addop cterm;
+
+   cterm ::= cfactor:cf {: RESULT = cf; :} 
+   			| cterm mulop cfactor;
+
+   cfactor ::= sign cfactor| cexponentiation:ce {: RESULT = ce; :};
+
+   cexponentiation ::= cprimary:cp {: RESULT = cp; :} | cprimary:cp STARSTAR cexponentiation {: RESULT = cp; :};
+
+   cprimary ::= identifier:id {: 
+   				    Simbolo t = null;
+   					if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   						parser.sem_error(id, "unknow name");
+   						RESULT = Tipo.getTipo(Tipo.ERRO);
+   					} else {
+   						RESULT = t.getTipo(); 
+   					}
+   				:} 
+   				| LPAREN cexpression:ce RPAREN {: RESULT = ce; :} 
+   				| unsigned_constant:uc {: RESULT  = uc.tipo; :}
+   				| NOT cprimary;
+
+   constant ::= non_string | sign non_string | CHARACTER_STRING;
+
+   sign ::= PLUS:pl  {: RESULT = pl; :}
+   		  | MINUS:mn {: RESULT = mn; :};
+
+   non_string ::= DIGSEQ | identifier| REALNUMBER;
+
+   type_definition_part ::= TYPE type_definition_list | ;
+
+   type_definition_list ::= type_definition_list type_definition | type_definition;
+
+   type_definition ::= identifier:id EQUAL type_denoter:td semicolon 
+   					{: if(! TabelaDeSimbolos.inserirVariavel(id.toLowerCase(), new Simbolo(id, td, true))) {
+                            	parser.sem_error(id, "duplicate name");
+                       } 
+                     :}  
+   					| error {: parser.report_error("","expected ';' before token"); :} semicolon;
+
+   type_denoter ::= IDENTIFIER:id  {:
+   						Simbolo t = null;
+   						if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   							parser.sem_error(id, "undefined type");
+   							RESULT = Tipo.getTipo(Tipo.ERRO);
+   						} else {
+   							RESULT = t.getTipo(); 
+   						}
+   					:} 
+   					| new_type 
+   					| STRING  {: RESULT = Tipo.getTipo(Tipo.STRING); :}
+   					| INTEGER {: RESULT = Tipo.getTipo(Tipo.INTEGER); :}
+   					| CHAR {: RESULT = Tipo.getTipo(Tipo.CHAR); :}
+   					| REAL {: RESULT = Tipo.getTipo(Tipo.REAL); :}
+   					| BOOLEAN {: RESULT = Tipo.getTipo(Tipo.BOOLEAN); :}  
+   					;
+
+   new_type ::= new_ordinal_type | new_structured_type | new_pointer_type;
+
+   new_ordinal_type ::= enumerated_type | subrange_type;
+
+   enumerated_type ::= LPAREN identifier_list RPAREN;
+
+   subrange_type ::= constant DOTDOT constant;
+
+   new_structured_type ::= structured_type | PACKED structured_type;
+
+   structured_type ::= array_type | record_type | set_type | file_type;
+
+   array_type ::= ARRAY LBRAC index_list RBRAC OF component_type;
+
+   index_list ::= index_list comma index_type | index_type;
+
+   index_type ::= ordinal_type ;
+
+   ordinal_type ::= new_ordinal_type | identifier;
+
+   component_type ::= type_denoter;
+
+   record_type ::= RECORD record_section_list END | RECORD record_section_list semicolon variant_part END
+                   | RECORD variant_part END;
+
+   record_section_list ::= record_section_list semicolon record_section | record_section;
+
+   record_section ::= identifier_list COLON type_denoter;
+
+   variant_part ::= CASE variant_selector OF variant_list semicolon | CASE variant_selector OF variant_list 
+                    | ;
+
+   variant_selector ::= tag_field COLON tag_type | tag_type;
+
+   variant_list ::= variant_list semicolon variant | variant;
+
+   variant ::= case_constant_list COLON LPAREN record_section_list RPAREN | 
+               case_constant_list COLON LPAREN record_section_list semicolon variant_part RPAREN | 
+               case_constant_list COLON LPAREN variant_part RPAREN;
+
+   case_constant_list ::= case_constant_list comma case_constant | case_constant;
+
+   case_constant ::= constant | constant DOTDOT constant;
+
+   tag_field ::= identifier;
+
+   tag_type ::= identifier;
+
+   set_type ::= SET OF base_type;
+
+   base_type ::= ordinal_type ;
+
+   file_type ::= PFILE OF component_type;
+
+   new_pointer_type ::= UPARROW domain_type;
+
+   domain_type ::= identifier;
+
+   variable_declaration_part ::= VAR variable_declaration_list | ;
+
+   variable_declaration_list ::= variable_declaration_list variable_declaration
+                              | variable_declaration;
+
+   variable_declaration ::= identifier_list : il COLON type_denoter : td semicolon {:
+                            	for(String id : il) {
+                            		if(! TabelaDeSimbolos.inserirVariavel(id.toLowerCase(), new Simbolo(id, td))) {
+                            			parser.sem_error(id, "duplicate name");
+                            		}
+                            	}
+   							:} 
+   							| error {: parser.report_error("","expected ';' before token"); :} semicolon;
+
+   procedure_and_function_declaration_part ::= proc_or_func_declaration_list semicolon | ;
+
+   proc_or_func_declaration_list ::= proc_or_func_declaration_list semicolon proc_or_func_declaration
+                                  | proc_or_func_declaration;
+
+   proc_or_func_declaration ::= procedure_declaration | function_declaration;
+
+   procedure_declaration ::= procedure_heading semicolon directive | 
+                             procedure_heading semicolon procedure_block {:
+								parser.code.append("\t BR *0(SP) \n");
+								TabelaDeSimbolos.pop();
+                             :} ;
+
+   procedure_heading ::= procedure_identification:pi {:TabelaDeSimbolos.push(); parser.code.append(pi+": \n");:}
+   						| 
+   						procedure_identification:pi {: TabelaDeSimbolos.push(); parser.code.append(pi+": \n"); :} 
+						formal_parameter_list:fpl
+   						{: Simbolo s = TabelaDeSimbolos.get(pi.toLowerCase());
+                            if(s != null) {
+								TipoFuncao t = (TipoFuncao) s.getTipo();
+								t.addParamTipo(fpl);
+							}
+                         :}
+   						;
+
+   directive ::= FORWARD | EXTERNAL;
+
+   formal_parameter_list ::= LPAREN formal_parameter_section_list:fpsl RPAREN {: RESULT = fpsl; :};
+
+   formal_parameter_section_list ::= formal_parameter_section_list:fpsl semicolon formal_parameter_section:fps 
+   									{:
+										for(Tipo t : fps) {
+											fpsl.add(t);
+										} 
+										RESULT = fpsl;
+                                   :}
+   								   | 
+                                   formal_parameter_section:fps {:
+                                   List<Tipo> l = new ArrayList<Tipo>();
+                                   for(Tipo t : fps) {
+                                   		l.add(t);
+                                   } 
+                                   RESULT = l;
+                                   :}; 
+
+   formal_parameter_section ::= value_parameter_specification:vps {: RESULT = vps; :} 
+   							  | variable_parameter_specification: varps {: RESULT = varps; :} 
+                              | procedural_parameter_specification
+                              | functional_parameter_specification;
+
+   value_parameter_specification ::= identifier_list:il COLON type_denoter:td
+   								{:
+   								    List<Tipo> l = new ArrayList<Tipo>();
+   									for(String id : il) {
+                            			if(! TabelaDeSimbolos.inserirVariavel(id.toLowerCase(), new Simbolo(id, td))) {
+                            				parser.sem_error(id, "duplicate name");
+                            			}
+                            			l.add(td);
+                            			argRegs.add(new Reg("A"+argRegs.size(), id));
+                            		}
+                            		RESULT = l;
+   								:}
+   								;
+
+   variable_parameter_specification ::= VAR identifier_list:il COLON type_denoter:td
+   									{: 
+								/* para facilitar, consideramos que as duas formas recebem parâmetros */
+										 
+   									    List<Tipo> l = new ArrayList<Tipo>();
+   									    int i = 0;
+   										for(String id : il) {
+                            				if(! TabelaDeSimbolos.inserirVariavel(id.toLowerCase(), new Simbolo(id, td))) {
+                            					parser.sem_error(id, "duplicate name");
+                            				}
+                            				l.add(td);
+                            				argRegs.add(new Reg("A"+i, id));
+											i++;
+                            			}
+                            			RESULT = l;
+   								:}
+   									;
+
+   procedural_parameter_specification ::= procedure_heading ;
+
+   functional_parameter_specification ::= function_heading ;
+
+   procedure_identification ::= PROCEDURE identifier:id 
+   								{:
+									
+   									if(! TabelaDeSimbolos.inserir(id.toLowerCase(), new Simbolo(id, new TipoFuncao(Tipo.getTipo(Tipo.TIPO_VOID))))) {
+                            			parser.sem_error(id, "duplicate name");
+                            			RESULT = "";
+                            		}
+                            		else {
+                            			RESULT = id;
+                            		}
+                        		:} ;
+
+   procedure_block ::= block ;
+
+   function_declaration ::= function_heading semicolon directive | 
+                          function_identification semicolon function_block | 
+                          function_heading semicolon function_block 
+                           {:
+                              parser.code.append("\t BR *0(SP) \n"); 
+                              TabelaDeSimbolos.pop();
+                            :};
+
+   function_heading ::= FUNCTION identifier:id COLON result_type:rt {:
+   							if(! TabelaDeSimbolos.inserir(id.toLowerCase(), new Simbolo(id, new TipoFuncao(rt)))) {
+                            	parser.sem_error(id, "duplicate name");
+                            } else {
+								TabelaDeSimbolos.push();
+								parser.code.append(id+": \n");
+                            } 
+   						:}
+   						| function_identification:fi {:TabelaDeSimbolos.push(); parser.code.append(fi+": \n");:}
+						  formal_parameter_list:fpl COLON result_type:rt {:
+   							
+   							if(fi != null) {
+								Simbolo s = TabelaDeSimbolos.get(fi.toLowerCase());
+								TipoFuncao t = (TipoFuncao) s.getTipo();
+								t.setTipoRetorno(rt);
+								t.addParamTipo(fpl);
+							}
+                             
+                        :} 
+                        ;
+
+   result_type ::= type_denoter:td {: RESULT = td; :};
+
+   function_identification ::= FUNCTION identifier: id 
+				{: 
+					if(! TabelaDeSimbolos.inserir(id.toLowerCase(), new Simbolo(id, new TipoFuncao(Tipo.getTipo(Tipo.TIPO_VOID))))) {
+                            parser.sem_error(id, "duplicate name");
+                            RESULT = null;
+                    }
+                    else {
+						RESULT = id;
+					} 
+				:};
+
+   function_block ::= block ;
+
+   statement_part ::= compound_statement ;
+
+   compound_statement ::= BEGIN statement_sequence END ;
+
+   statement_sequence ::= statement_sequence semicolon statement | statement;
+
+   statement ::= open_statement | closed_statement;
+
+   open_statement ::= label COLON non_labeled_open_statement | non_labeled_open_statement;
+
+   closed_statement ::= label COLON non_labeled_closed_statement | non_labeled_closed_statement;
+
+   non_labeled_closed_statement ::= assignment_statement | procedure_statement
+                                   | goto_statement
+                                   | compound_statement
+ 								   | case_statement
+                                   | repeat_statement 
+										{: 	
+											labels.add(labels.size()+1);
+											parser.code.append("$L"+labels.size()+":\n");
+										:}
+                                   | closed_with_statement
+                                   | closed_if_statement
+                                   | closed_while_statement
+                                   | closed_for_statement
+                                   | ;
+
+   non_labeled_open_statement ::= open_with_statement | open_if_statement | open_while_statement | 
+                               open_for_statement;
+
+   repeat_statement ::= REPEAT {:   
+									labels.add(labels.size()+1);
+									label = labels.size();
+									parser.code.append("$L"+labels.size()+":\n");
+						       :} 
+						statement_sequence UNTIL boolean_expression:be
+						{:
+							parser.code.append("\t LD R0"+" , "+be.code+"\n");
+							parser.code.append("\t SUB R1 , R0 , 1\n");
+							parser.code.append("\t BEQZ R1 , $L"+label+"\n");
+							label --;
+						:}
+						;
+   
+   while_designator ::= WHILE boolean_expression:be 
+						{:
+							String lbl1 = "", lblFalse = "";
+							
+							labels.add(labels.size()+1);
+							lbl1 = "$L"+labels.size();
+							
+							parser.code.append(lbl1+":\n");
+							parser.code.append("\t LD R0 , "+be.code+"\n");
+							parser.code.append("\t SUB R0 , R0 , 1\n");
+							
+							labels.add(labels.size()+1);
+							lblFalse = "$L"+labels.size();
+							
+							parser.code.append("\t BLTZ R0 , "+lblFalse+"\n");
+							
+							List<String> whileArgs = new ArrayList <String> ();
+							whileArgs.add(lbl1);
+							whileArgs.add(lblFalse);
+							
+							RESULT = whileArgs;
+						:};
+
+   open_while_statement ::= while_designator:wd DO open_statement
+							{:
+								 parser.code.append("\t BR "+wd.get(0)+"\n");
+								 parser.code.append(wd.get(1)+":\n");
+							:}
+							;
+
+   closed_while_statement ::= while_designator:wd DO closed_statement
+							{:
+								 parser.code.append("\t BR "+wd.get(0)+"\n");
+								 parser.code.append(wd.get(1)+":\n");
+							:};
+   
+   for_designator ::= FOR control_variable:cv ASSIGNMENT initial_value:iv direction:dir final_value:fv 
+					  {:
+						String lbl1 = "", lblFalse = "";
+						if(!cv.tipo.getVal().equals("error")) {
+							if(!cv.tipo.getVal().equals(iv.tipo.getVal())) {
+								parser.sem_error(cv.tipo.getVal(), "The type of initial value must be ");
+							}
+							else if(!cv.tipo.getVal().equals(fv.tipo.getVal())) {
+								parser.sem_error(cv.tipo.getVal(), "The type of final value must be ");
+							}
+							else {
+								parser.code.append("\t ST "+cv.code+" , "+iv.code+"\n");
+								labels.add(labels.size()+1);
+								lbl1 = "$L"+labels.size();
+								parser.code.append(lbl1+":\n");
+								parser.code.append("\t LD R4 , "+fv.code+"\n");
+								parser.code.append("\t LD R3 , "+cv.code+"\n");
+								parser.code.append("\t SUB R0 , R3 , R4\n");
+								labels.add(labels.size()+1);
+								lblFalse = "$L"+labels.size();
+								if(dir != null && dir.toLowerCase().equals("to"))
+									parser.code.append("\t BGTZ R0 , "+lblFalse+"\n");
+								else if(dir != null && dir.toLowerCase().equals("downto"))
+									parser.code.append("\t BLTZ R0 , "+lblFalse+"\n");
+							}
+						}
+						List<String> forArgs = new ArrayList<String>();
+						forArgs.add(cv.code);
+						forArgs.add(dir);
+						forArgs.add(lbl1);
+						forArgs.add(lblFalse);
+						RESULT = forArgs;
+					  :};
+
+   open_for_statement ::= for_designator:fd DO open_statement
+                          {:
+							parser.code.append("\t LD R3 , "+fd.get(0)+"\n");
+							if(fd.get(1) != null && fd.get(1).toLowerCase().equals("to")) {
+								parser.code.append("\t ADD R3 , R3 , #1\n");
+							}
+							else if(fd.get(1) != null && fd.get(1).toLowerCase().equals("downto")) {
+								parser.code.append("\t SUB R3 , R3 , #1\n");
+							}
+                          	parser.code.append("\t ST "+fd.get(0)+" , R3\n");
+                          	parser.code.append("\t BR "+fd.get(2)+"\n");
+                          	parser.code.append(fd.get(3)+":\n");
+                          	
+                          :};
+                                                              
+
+   closed_for_statement ::= for_designator:fd DO closed_statement 
+							{:
+								parser.code.append("\t LD R3 , "+fd.get(0)+"\n");
+							    if(fd.get(1) != null && fd.get(1).toLowerCase().equals("to")) {
+									parser.code.append("\t ADD R3 , R3 , #1\n");
+								}
+								else if(fd.get(1) != null && fd.get(1).toLowerCase().equals("downto")) {
+									parser.code.append("\t SUB R3 , R3 , #1\n");
+								}
+								parser.code.append("\t ST "+fd.get(0)+" , R3\n");
+								parser.code.append("\t BR "+fd.get(2)+"\n");
+								parser.code.append(fd.get(3)+":\n");
+							:};
+
+   open_with_statement ::= WITH record_variable_list DO open_statement;
+
+   closed_with_statement ::= WITH record_variable_list DO closed_statement;
+
+   open_if_statement ::= IF boolean_expression THEN statement 
+                    | IF boolean_expression THEN closed_statement ELSE open_statement;
+
+   closed_if_statement ::= IF boolean_expression THEN closed_statement ELSE closed_statement;
+   
+   assignment_statement ::= variable_access:tva ASSIGNMENT expression:texp
+   						{: 
+   							if( tva.tipo instanceof TipoFuncao ) {
+								if(TabelaDeSimbolos.escopoCorrente.isRoot()) {
+									parser.sem_error(tva.code, "retorno fora do escopo da funcao ");
+									RESULT = Tipo.getTipo(Tipo.ERRO);
+								}
+								else {
+								    TipoFuncao tf = (TipoFuncao) tva.tipo;
+								    Tipo rt = tf.getTipoRetorno();
+								    if(! rt.getVal().equals(texp.tipo.getVal())) {
+									 if(! rt.getVal().equals("error") && ! rt.getVal().equals("error")) {
+										 if(! (rt.getVal().equals("real") && texp.tipo.getVal().equals("integer"))) {
+											 parser.sem_error(rt.getVal(), "cannot convert from "+ texp.tipo.getVal() + " to ");
+											 RESULT = Tipo.getTipo(Tipo.ERRO);
+										 }
+									 }
+									}
+									else {
+										tva.code = "V0";
+										parser.code.append("\t LD "+tva.code+" , "+texp.code +"\n");
+										RESULT = Tipo.getTipo(Tipo.TIPO_VOID);
+									}
+								}
+							}
+   							else if(! tva.tipo.getVal().equals(texp.tipo.getVal())) {
+   								if(! texp.tipo.getVal().equals("error") && ! tva.tipo.getVal().equals("error")) {
+   									if(! (tva.tipo.getVal().equals("real") && texp.tipo.getVal().equals("integer"))) {
+   										parser.sem_error(tva.tipo.getVal(), "cannot convert from "+ texp.tipo.getVal() + " to ");
+   										RESULT = Tipo.getTipo(Tipo.ERRO);
+   									}
+   									else {
+										parser.code.append("\t ST "+tva.code+" , "+texp.code +"\n");
+   										RESULT = Tipo.getTipo(Tipo.TIPO_VOID);
+   									}
+   								}
+   						   }
+   						   else {
+								parser.code.append("\t ST "+tva.code+" , "+texp.code +"\n");
+   						        RESULT = Tipo.getTipo(Tipo.TIPO_VOID);
+   						   }
+   						:}
+   						;
+
+   variable_access ::= identifier:id {: 
+   					Simbolo t = null;
+   					if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   						parser.sem_error(id, "unknow name");
+   						RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   					} else {
+   						RESULT = new Exp(t.getTipo(), id); 
+   					}
+   					:} 
+   					| indexed_variable 
+   					| field_designator 
+   					| variable_access UPARROW;
+
+   indexed_variable ::= variable_access LBRAC index_expression_list RBRAC;
+
+   index_expression_list ::= index_expression_list comma index_expression | index_expression;
+
+   index_expression ::= expression;
+
+   field_designator ::= variable_access DOT identifier;
+
+   procedure_statement ::= identifier:id params:prs{:
+   							
+   							 Simbolo t = null;
+   							 if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   								 parser.sem_error(id, "unknow name");
+   								
+   							 }
+   							 else {
+   								
+   								TipoFuncao tf = (TipoFuncao) t.getTipo();
+   								if(tf.getTipoParametros().size() != prs.size()) {
+   									parser.sem_error(id, "expected " + tf.getTipoParametros().size() + " parameters in function");
+   									
+   								}
+   								else {
+   									for(int i = 0; i < prs.size(); i++) {
+   										if(! tf.getTipoParametros().get(i).getVal().equals(prs.get(i).tipo.getVal())) {
+   											parser.sem_error(id, "Tipos dos parametros passados sao imcompativeis com os parametros de");
+   											
+   										}
+   										Reg argReg = new Reg("A"+i);
+   										parser.code.append("\t LD "+argReg.id+" , "+prs.get(i).code+"\n"); 
+   									}
+   									parser.code.append("\t ADD SP , SP , #caller.recordSize\n"); 
+   									parser.code.append("\t ST 0(SP) , #here + 16\n"); 
+   									parser.code.append("\t BR "+id+"\n"); 
+   									parser.code.append("\t SUB SP , SP , #caller.recordSize\n");
+   								}
+   							 }
+   							
+   						:}
+   						  | identifier:id {:
+   							Simbolo t = null;
+   							 if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   								 parser.sem_error(id, "unknow name");
+   								
+   							 }
+   							 else {
+   								
+   								TipoFuncao tf = (TipoFuncao) t.getTipo();
+   								if(tf.getTipoParametros().size() != 0) {
+   									parser.sem_error(id, "expected " + tf.getTipoParametros().size() + " parameters in function");
+   									
+   								} else {
+									parser.code.append("\t ADD SP , SP , #caller.recordSize\n"); 
+   									parser.code.append("\t ST 0(SP) , #here + 16\n"); 
+   									parser.code.append("\t BR "+id+"\n"); 
+   									parser.code.append("\t SUB SP , SP , #caller.recordSize\n");
+   								}
+   							 }
+   							
+   						:}
+   						;
+
+   params ::= LPAREN actual_parameter_list:apl RPAREN {: RESULT = apl; :};
+
+   actual_parameter_list ::= actual_parameter_list:apl comma actual_parameter:ap
+   							{:
+   								apl.add(ap);
+   								RESULT = apl;
+   							:} 
+   							| 
+   							actual_parameter:ap {:
+   								List<Exp> l = new ArrayList<Exp>();
+   								l.add(ap);
+   								RESULT = l;
+   							:};
+
+  /*
+   * this forces you to check all this to be sure that only write and
+   * writeln use the 2nd and 3rd forms, you really can't do it easily in
+   * the grammar, especially since write and writeln aren't reserved
+   */
+   actual_parameter ::= expression:exp {: RESULT = exp; :} | expression COLON expression | 
+                        expression COLON expression COLON expression;
+
+   goto_statement ::= GOTO label;
+
+   case_statement ::= CASE case_index OF case_list_element_list END
+                  | CASE case_index OF case_list_element_list SEMICOLON END;
+
+   case_index ::= expression;
+ 
+   case_list_element_list ::= case_list_element_list semicolon case_list_element | case_list_element;
+
+   case_list_element ::= case_constant_list COLON statement;
+
+   control_variable ::= identifier:id {: 
+   							Simbolo t = null;
+   							if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   								parser.sem_error(id, "unknow name");
+   								RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   							} else if(t.getTipo().getVal().equals("char") || t.getTipo().getVal().equals("integer")){
+   								RESULT = new Exp(t.getTipo(), id); 
+   							}
+   							else {
+   								parser.sem_error("char or integer", "The type of control variable '"+id+"' must be ");
+   								RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   							}
+   						:};
+
+   initial_value ::= expression:exp {: RESULT = exp; :};
+
+   direction ::= TO {: RESULT = "to"; :} | DOWNTO {: RESULT = "downTo"; :};
+
+   final_value ::= expression:exp {: RESULT = exp; :};
+
+   record_variable_list ::= record_variable_list comma variable_access | variable_access;
+
+   boolean_expression ::= expression:exp {: 
+   							if(exp != null) {
+   								if(! exp.tipo.getVal().equals("boolean")) {
+   									if(! exp.tipo.getVal().equals("error"))
+   										parser.sem_error(exp.tipo.getVal(), "cannot convert to boolean ");
+   							 		RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   								}
+   								else {
+   									RESULT = new Exp(exp.tipo, exp.code);
+   								}
+   							}
+   						  :};
+
+   expression ::= simple_expression:se {: RESULT = new Exp(se.tipo, se.code); :} | 
+   				  simple_expression relop simple_expression
+   				  {: RESULT = new Exp(Tipo.getTipo(Tipo.BOOLEAN), ""); :}
+   				  ;
+
+   simple_expression ::= term:te {: 
+									RESULT = new Exp(te.tipo, te.code, te.isConstant); 
+						:} 
+   						| simple_expression:se addop:ad term:te
+   					{:
+   						if(ad != null) {
+   							if(ad.toLowerCase().equals("or")) {
+   								if(!(se.tipo.getVal().equals("boolean") && te.tipo.getVal().equals("boolean"))) {
+   									parser.sem_error(se.tipo.getVal() + ", " + te.tipo.getVal(), "The operator OR is undefined for the argument types ");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   								}
+   								else {
+									if(! "R1".equals(se.code))
+										parser.code.append("\t LD R1 , "+se.code+"\n");
+									se.code = "R1";
+									parser.code.append("\t OR "+se.code+" , "+se.code+" , "+te.code+"\n");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.BOOLEAN), se.code);
+   								}
+   							}
+   							else if(ad.toLowerCase().equals("-") || ad.toLowerCase().equals("+")) {
+   								if((se.tipo.getVal().equals("integer") || se.tipo.getVal().equals("real")) &&
+   								  (te.tipo.getVal().equals("integer") || te.tipo.getVal().equals("real"))) {
+									
+									String op = assembOp(ad.toLowerCase());
+									if(se.isConstant) {
+										parser.code.append("\t "+op+" R1 , "+se.code+" , "+te.code+"\n");
+										se.code = "R1";
+									}
+									else {
+										parser.code.append("\t "+op+" "+se.code+" , "+se.code+" , "+te.code+"\n");
+									}
+   									RESULT = new Exp(Tipo.maximo(se.tipo, te.tipo), se.code);
+   								}
+   								else if((se.tipo.getVal().equals("char") || se.tipo.getVal().equals("string")) &&
+   								  (te.tipo.getVal().equals("char") || te.tipo.getVal().equals("string"))) {
+   									RESULT = new Exp(Tipo.maximo(se.tipo, te.tipo), "?");
+   								}
+   								else {
+   									parser.sem_error(se.tipo.getVal() + ", " + te.tipo.getVal(), "The operator "+ad+" is undefined for the argument types ");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   								}
+   							}
+   							
+   						}
+   					:}
+   						;
+
+   term ::= factor:f {: RESULT = new Exp(f.tipo, f.code, f.isConstant); :} 
+   			| term:se mulop:ad factor:te
+   			{:
+   						if(ad != null) {
+   							if(ad.toLowerCase().equals("and")) {
+   								if(!(se.tipo.getVal().equals("boolean") && te.tipo.getVal().equals("boolean"))) {
+   									parser.sem_error(se.tipo.getVal() + ", " + te.tipo.getVal(), "The operator AND is undefined for the argument types ");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   								}
+   								else {
+									if(! "R1".equals(se.code))
+										parser.code.append("\t LD R1 , "+se.code+"\n");
+									se.code = "R1";
+									parser.code.append("\t AND "+se.code+" , "+se.code+" , "+te.code+"\n");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.BOOLEAN), se.code);
+   								}
+   							}
+   							else if(ad.toLowerCase().equals("*") || ad.toLowerCase().equals("/")) {
+   								if((se.tipo.getVal().equals("integer") || se.tipo.getVal().equals("real")) &&
+   								  (te.tipo.getVal().equals("integer") || te.tipo.getVal().equals("real"))) {
+   									String op = assembOp(ad.toLowerCase());
+									if(se.isConstant) {
+										parser.code.append("\t "+op+" R1 , "+se.code+" , "+te.code+"\n");
+										se.code = "R1";
+									}
+									else {
+										parser.code.append("\t "+op+" "+se.code+" , "+se.code+" , "+te.code+"\n");
+									}
+   									RESULT = new Exp(Tipo.maximo(se.tipo, te.tipo), se.code);
+   								}
+   								else {
+   									parser.sem_error(se.tipo.getVal() + ", " + te.tipo.getVal(), "The operator "+ad+" is undefined for the argument types ");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   								}
+   							}
+   							else if(ad.toLowerCase().equals("mod") || ad.toLowerCase().equals("div")) {
+   								if(se.tipo.getVal().equals("integer") && te.tipo.getVal().equals("integer")) {
+									String op = assembOp(ad.toLowerCase());
+									if(se.isConstant) {
+										parser.code.append("\t "+op+" R1 , "+se.code+" , "+te.code+"\n");
+										se.code = "R1";
+									}
+									else {
+										parser.code.append("\t "+op+" "+se.code+" , "+se.code+" , "+te.code+"\n");
+									}
+   									RESULT = new Exp(Tipo.getTipo(Tipo.INTEGER), se.code);
+   								}
+   								else {
+   									parser.sem_error(se.tipo.getVal() + ", " + te.tipo.getVal(), "The operator "+ad+" is undefined for the argument types ");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   								}
+   							}
+   						}
+   					:}
+   			;
+
+   factor ::= sign:sn factor:f {: 
+   				if(sn.toLowerCase().equals("-")) {
+   					if(! (f.tipo.getVal().equals("integer") || f.tipo.getVal().equals("real"))) {
+   						parser.sem_error(f.tipo.getVal(), "The operator - is undefined for the expression type");
+   						RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   					}
+   					else {
+   						RESULT = f;
+   					}
+   				}
+   				else if(sn.toLowerCase().equals("+")) {
+   					if(! (f.tipo.getVal().equals("integer") || f.tipo.getVal().equals("real")
+   							|| f.tipo.getVal().equals("string") || f.tipo.getVal().equals("char"))) {
+   						parser.sem_error(f.tipo.getVal(), "The operator + is undefined for the expression type");
+   						RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "");
+   					}
+   					else {
+   						RESULT = f;
+   					}
+   				}
+   			:} 
+   			| exponentiation:exp {: RESULT = new Exp(exp.tipo, exp.code, exp.isConstant); :};
+
+   exponentiation ::= primary:p {: 
+						RESULT = new Exp(p.tipo, p.code, p.isConstant); 
+						:} 
+						| primary STARSTAR exponentiation;
+
+   primary ::= variable_access:va {:
+   						if(va.tipo instanceof TipoFuncao) {
+							TipoFuncao tf = (TipoFuncao) va.tipo;
+   							if( tf.getTipoParametros().size() != 0) {
+   								parser.sem_error("", "expected "+tf.getTipoParametros().size()
+   											+" parameters in function");
+								RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   							} else {
+								parser.code.append("\t ADD SP , SP , #caller.recordSize\n"); 
+   								parser.code.append("\t ST 0(SP) , #here + 16\n"); 
+   								parser.code.append("\t BR "+va.code+"\n"); 
+   								parser.code.append("\t SUB SP , SP , #caller.recordSize\n");
+   								RESULT = new Exp(va.tipo,"V0");
+   							}
+   						} else {
+							if(! TabelaDeSimbolos.escopoCorrente.isRoot()) {
+									Reg arg = getArgReg(va.code);
+									if(arg != null) {
+										va.code = arg.id;
+										//Se a variable_access for um argumento, carregar em regs diferentes
+										parser.code.append("\t LD R"+va.code.charAt(1)+" , "+va.code +"\n"); 
+										RESULT =  new Exp(va.tipo, "R"+va.code.charAt(1));
+									}
+									else {
+										parser.code.append("\t LD R0 , "+va.code +"\n");
+										RESULT =  new Exp(va.tipo, "R0"); 
+									}
+							}
+							else {
+								parser.code.append("\t LD R0 , "+va.code +"\n");
+								RESULT =  new Exp(va.tipo, "R0"); 
+							}
+						}
+				:}
+   			 | unsigned_constant:uc {: RESULT = new Exp(uc.tipo, "#"+uc.code, true); :} 
+   			 | function_designator:fd {: RESULT = new Exp(fd.tipo, fd.code); :}
+   			 | set_constructor
+             | LPAREN expression:exp RPAREN {: 
+					if(getArgReg("temp") == null) {
+						parser.code.append("\t LD R2 , "+exp.code+"\n");
+						argRegs.add(new Reg("R2", "temp"));
+						exp.code = "R2";
+					}
+					RESULT = exp; 
+					
+				:}
+             | NOT primary:pr 
+             {: if(! pr.tipo.getVal().equals("boolean")) {
+             		if(! pr.tipo.getVal().equals("error")) {
+             			parser.sem_error(pr.tipo.getVal(), "The operator NOT is undefined for the expression type");
+             		}
+             		RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+             	}
+             	else {
+					parser.code.append("\t LD R0 , "+pr.code+"\n");
+					parser.code.append("\t NOT R0\n");
+					pr.code = "R0";
+             		RESULT = pr;
+             	}
+             :}
+             | TRUE  {: RESULT = new Exp(Tipo.getTipo(Tipo.BOOLEAN), "1"); :}
+             | FALSE {: RESULT = new Exp(Tipo.getTipo(Tipo.BOOLEAN), "0"); :}
+             ;
+
+   unsigned_constant ::= unsigned_number:un {: RESULT = new Exp(un.tipo, un.code); :} 
+						| CHARACTER_STRING:cs {: 
+   						  RESULT = (cs.length() == 3) ? new Exp(Tipo.getTipo(Tipo.CHAR), cs) : 
+														new Exp(Tipo.getTipo(Tipo.STRING), cs); :}
+   						 | NIL;
+
+   unsigned_number ::= unsigned_integer : ui {: RESULT = new Exp(ui.tipo, ui.code); :} 
+   					 | unsigned_real :ur {: RESULT = new Exp(ur.tipo, ur.code); :};
+
+   unsigned_integer ::= DIGSEQ:ds {: RESULT = new Exp(Tipo.getTipo(Tipo.INTEGER), ""+ds); :};
+
+   unsigned_real ::= REALNUMBER:rn {: RESULT = new Exp(Tipo.getTipo(Tipo.REAL), ""+rn); :};
+
+/* functions with no params will be handled by plain identifier */
+   function_designator ::= identifier:id params:prs {:
+   							Simbolo t = null;
+   							if((t = TabelaDeSimbolos.get(id.toLowerCase())) == null) {
+   								parser.sem_error(id, "unknow name");
+   								RESULT = new Exp(Tipo.getTipo(Tipo.ERRO), "?");
+   							}
+   							else {
+								TipoFuncao tf = (TipoFuncao) t.getTipo();
+   								if(tf.getTipoParametros().size() != prs.size()) {
+   									parser.sem_error(id, "expected " + tf.getTipoParametros().size() + " parameters in function");
+   									RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   								}
+   								else {
+   									for(int i = 0; i < prs.size(); i++) {
+   										if(! tf.getTipoParametros().get(i).getVal().equals(prs.get(i).tipo.getVal())) {
+   											parser.sem_error(id, "Tipos dos parametros passados sao imcompativeis com os parametros de");
+   											RESULT = new Exp(Tipo.getTipo(Tipo.ERRO),"");
+   										} else {
+											Reg argReg = argRegs.get(i);
+											parser.code.append("\t LD "+argReg.id+" , "+prs.get(i).code +"\n"); 
+   										}
+   									}
+   									parser.code.append("\t ADD SP , SP , #caller.recordSize\n"); 
+   									parser.code.append("\t ST 0(SP) , #here + 16\n"); 
+   									parser.code.append("\t BR "+id+"\n"); 
+   									parser.code.append("\t SUB SP , SP , #caller.recordSize\n");
+   									RESULT = new Exp(tf.getTipoRetorno(), "V0");
+   								}
+   							}
+   						:};
+
+   set_constructor ::= LBRAC member_designator_list RBRAC | LBRAC RBRAC;
+
+   member_designator_list ::= member_designator_list comma member_designator | member_designator;
+
+   member_designator ::= member_designator DOTDOT expression | expression;
+
+   addop ::= PLUS:p {: RESULT = p; :} 
+   			| MINUS:m {: RESULT = m; :}
+   			| OR :o {: RESULT = o; :};
+
+   mulop ::= STAR:s {: RESULT = s; :}
+   			| SLASH:sl {: RESULT = sl; :}
+   			| DIV:d {: RESULT = d; :}
+   			| MOD:m {: RESULT = m; :}
+   			| AND:a {: RESULT = a; :} ;
+
+   relop ::= EQUAL | NOTEQUAL | LT | GT | LE | GE | IN;
+
+   identifier ::= IDENTIFIER:x {: 
+   								
+   								RESULT = x; :};
+
+   semicolon ::= SEMICOLON;
+
+   comma ::= COMMA;
